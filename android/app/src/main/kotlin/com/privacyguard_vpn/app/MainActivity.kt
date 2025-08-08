@@ -1,0 +1,6 @@
+package com.privacyguard_vpn.app
+
+import io.flutter.embedding.android.FlutterActivity
+
+class MainActivity: FlutterActivity() {
+}
