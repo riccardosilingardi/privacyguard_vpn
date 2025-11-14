@@ -2,7 +2,7 @@ import 'dart:async';
 import '../../core/network/convex_service.dart';
 import '../../core/utils/logger.dart';
 import '../../domain/repositories/vpn_repository.dart';
-import '../../platforms/vpn/vpn_mock_implementation.dart';
+import '../../platforms/vpn/vpn_method_channel_impl.dart';
 import '../../platforms/vpn/vpn_platform_interface.dart';
 import '../models/vpn/vpn_server_model.dart';
 
@@ -17,7 +17,7 @@ class VpnRepositoryImpl implements VpnRepository {
   final _sessionController = StreamController<VpnSessionModel>.broadcast();
 
   VpnRepositoryImpl({VpnPlatformInterface? vpnPlatform})
-      : _vpnPlatform = vpnPlatform ?? VpnMockImplementation() {
+      : _vpnPlatform = vpnPlatform ?? VpnMethodChannelImpl() {
     _initializeStatusListener();
   }
 
