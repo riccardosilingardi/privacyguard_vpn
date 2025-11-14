@@ -1,6 +1,7 @@
 import 'dart:async';
 import '../../core/network/convex_service.dart';
 import '../../core/utils/logger.dart';
+import '../../core/config/vpn_test_config.dart';
 import '../../domain/repositories/vpn_repository.dart';
 import '../../platforms/vpn/vpn_method_channel_impl.dart';
 import '../../platforms/vpn/vpn_platform_interface.dart';
@@ -8,7 +9,16 @@ import '../models/vpn/vpn_server_model.dart';
 
 class VpnRepositoryImpl implements VpnRepository {
   final VpnPlatformInterface _vpnPlatform;
-  final convex = ConvexService.client;
+
+  // Try to get Convex client, but don't fail if not initialized
+  dynamic get _convex {
+    try {
+      return ConvexService.client;
+    } catch (e) {
+      AppLogger.warning('Convex not initialized, using fallback');
+      return null;
+    }
+  }
 
   VpnServerModel? _currentServer;
   VpnSessionModel? _currentSession;
@@ -34,12 +44,14 @@ class VpnRepositoryImpl implements VpnRepository {
   @override
   Future<void> connect(VpnServerModel server) async {
     try {
-      AppLogger.info('Connecting to VPN server: ${server.name}');
+      AppLogger.info('🔌 Connecting to VPN server: ${server.name}');
 
       _currentServer = server;
 
-      // Get server config from Convex
-      final config = await _getServerConfig(server.id);
+      // Generate test config for this server
+      final config = VpnTestConfig.generateTestConfig(server: server);
+
+      AppLogger.info('🔑 Generated WireGuard config for ${server.name}');
 
       // Connect using platform implementation
       await _vpnPlatform.connect(server, config);
@@ -47,14 +59,14 @@ class VpnRepositoryImpl implements VpnRepository {
       // Create session record
       _currentSession = VpnSessionModel(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
-        userId: 'current_user', // TODO: Get from auth
+        userId: 'test_user', // Test user
         serverId: server.id,
         startedAt: DateTime.now(),
       );
 
-      AppLogger.info('VPN connected successfully');
+      AppLogger.info('✅ VPN connected successfully to ${server.name}');
     } catch (e, stack) {
-      AppLogger.error('VPN connection failed', e, stack);
+      AppLogger.error('❌ VPN connection failed', e, stack);
       rethrow;
     }
   }
@@ -62,7 +74,7 @@ class VpnRepositoryImpl implements VpnRepository {
   @override
   Future<void> disconnect() async {
     try {
-      AppLogger.info('Disconnecting VPN...');
+      AppLogger.info('⏸️ Disconnecting VPN...');
 
       await _vpnPlatform.disconnect();
 
@@ -81,36 +93,41 @@ class VpnRepositoryImpl implements VpnRepository {
           icrEarned: _currentSession!.icrEarned,
         );
 
-        // Save session to Convex
+        // Save session to Convex (if available)
         await _saveSession(endedSession);
       }
 
       _currentServer = null;
       _currentSession = null;
 
-      AppLogger.info('VPN disconnected');
+      AppLogger.info('✅ VPN disconnected');
     } catch (e, stack) {
-      AppLogger.error('VPN disconnect failed', e, stack);
+      AppLogger.error('❌ VPN disconnect failed', e, stack);
       rethrow;
     }
   }
 
   @override
   Future<List<VpnServerModel>> getServers() async {
-    try {
-      final result = await convex.query('vpn:getServers', {});
-      final servers = (result as List)
-          .map((json) => VpnServerModel.fromJson(json as Map<String, dynamic>))
-          .toList();
+    // Try Convex first if available
+    if (_convex != null) {
+      try {
+        final result = await _convex.query('vpn:getServers', {});
+        final servers = (result as List)
+            .map((json) => VpnServerModel.fromJson(json as Map<String, dynamic>))
+            .toList();
 
-      AppLogger.info('Fetched ${servers.length} VPN servers');
-      return servers;
-    } catch (e) {
-      AppLogger.error('Failed to fetch servers', e);
-
-      // Return mock servers as fallback
-      return _getMockServers();
+        AppLogger.info('✅ Fetched ${servers.length} VPN servers from Convex');
+        return servers;
+      } catch (e) {
+        AppLogger.warning('⚠️ Convex query failed, using test servers: $e');
+      }
     }
+
+    // Fallback to test servers
+    final testServers = VpnTestConfig.testServers;
+    AppLogger.info('✅ Using ${testServers.length} test VPN servers');
+    return testServers;
   }
 
   @override
@@ -138,6 +155,7 @@ class VpnRepositoryImpl implements VpnRepository {
       return scoreB.compareTo(scoreA);
     });
 
+    AppLogger.info('✅ Best server: ${filteredServers.first.name} (load: ${filteredServers.first.load}%, latency: ${filteredServers.first.latency}ms)');
     return filteredServers.first;
   }
 
@@ -147,11 +165,6 @@ class VpnRepositoryImpl implements VpnRepository {
 
   @override
   Stream<VpnSessionModel> get sessionStatsStream => _sessionController.stream;
-
-  Future<String> _getServerConfig(String serverId) async {
-    // TODO: Fetch real config from Convex
-    return 'mock_config_for_$serverId';
-  }
 
   void _updateSessionStats(VpnSessionStats stats) {
     if (_currentSession == null) return;
@@ -172,47 +185,23 @@ class VpnRepositoryImpl implements VpnRepository {
   }
 
   Future<void> _saveSession(VpnSessionModel session) async {
-    try {
-      await convex.mutation('vpn:saveSession', session.toJson());
-      AppLogger.info('Session saved: ${session.id}');
-    } catch (e) {
-      AppLogger.error('Failed to save session', e);
+    // Only save if Convex is available
+    if (_convex != null) {
+      try {
+        await _convex.mutation('vpn:endSession', {
+          'sessionId': session.id,
+          'bytesIn': session.bytesIn,
+          'bytesOut': session.bytesOut,
+          'trackersBlocked': session.trackersBlocked,
+          'adsBlocked': session.adsBlocked,
+        });
+        AppLogger.info('✅ Session saved to Convex: ${session.id}');
+      } catch (e) {
+        AppLogger.warning('⚠️ Failed to save session to Convex: $e');
+      }
+    } else {
+      AppLogger.info('ℹ️ Session completed (Convex unavailable): ${session.id}');
     }
-  }
-
-  List<VpnServerModel> _getMockServers() {
-    return [
-      const VpnServerModel(
-        id: '1',
-        name: 'Amsterdam, Netherlands',
-        countryCode: 'NL',
-        cityName: 'Amsterdam',
-        ipAddress: '185.232.23.1',
-        port: 1194,
-        load: 25,
-        latency: 28,
-      ),
-      const VpnServerModel(
-        id: '2',
-        name: 'London, UK',
-        countryCode: 'GB',
-        cityName: 'London',
-        ipAddress: '185.232.24.1',
-        port: 1194,
-        load: 45,
-        latency: 35,
-      ),
-      const VpnServerModel(
-        id: '3',
-        name: 'New York, USA',
-        countryCode: 'US',
-        cityName: 'New York',
-        ipAddress: '185.232.25.1',
-        port: 1194,
-        load: 60,
-        latency: 95,
-      ),
-    ];
   }
 
   void dispose() {
