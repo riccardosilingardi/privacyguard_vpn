@@ -1,12 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:sizer/sizer.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../core/app_export.dart';
-import '../widgets/custom_error_widget.dart';
+import 'core/app_export.dart';
+import 'core/network/convex_service.dart';
+import 'core/utils/logger.dart';
+import 'widgets/custom_error_widget.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize Convex Backend
+  try {
+    await ConvexService.initialize();
+    AppLogger.info('✅ Convex initialized successfully');
+  } catch (e, stack) {
+    AppLogger.error('❌ Convex initialization failed', e, stack);
+    // Continue anyway - will use fallback
+  }
 
   // 🚨 CRITICAL: Custom error handling - DO NOT REMOVE
   ErrorWidget.builder = (FlutterErrorDetails details) {
@@ -14,20 +26,28 @@ void main() async {
       errorDetails: details,
     );
   };
+
   // 🚨 CRITICAL: Device orientation lock - DO NOT REMOVE
-  Future.wait([
-    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp])
-  ]).then((value) {
-    runApp(MyApp());
-  });
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+  ]);
+
+  runApp(
+    // 🚨 CRITICAL: ProviderScope enables Riverpod state management
+    const ProviderScope(
+      child: MyApp(),
+    ),
+  );
 }
 
 class MyApp extends StatelessWidget {
+  const MyApp({Key? key}) : super(key: key);
+
   @override
   Widget build(BuildContext context) {
     return Sizer(builder: (context, orientation, screenType) {
       return MaterialApp(
-        title: 'privacyguard_vpn',
+        title: 'PrivacyGuard VPN',
         theme: AppTheme.lightTheme,
         darkTheme: AppTheme.darkTheme,
         themeMode: ThemeMode.light,
@@ -35,7 +55,7 @@ class MyApp extends StatelessWidget {
         builder: (context, child) {
           return MediaQuery(
             data: MediaQuery.of(context).copyWith(
-              textScaler: TextScaler.linear(1.0),
+              textScaler: const TextScaler.linear(1.0),
             ),
             child: child!,
           );
