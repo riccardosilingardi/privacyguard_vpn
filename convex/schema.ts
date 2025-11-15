@@ -161,7 +161,7 @@ export default defineSchema({
 
   tracker_logs: defineTable({
     userId: v.id("users"),
-    sessionId: v.id("vpn_sessions"),
+    sessionId: v.union(v.id("vpn_sessions"), v.null()), // VPN sessions or null for browser,
     domain: v.string(), // "tracker.example.com"
     category: v.string(), // "advertising", "analytics", "social", "unknown"
     timestamp: v.number(),
