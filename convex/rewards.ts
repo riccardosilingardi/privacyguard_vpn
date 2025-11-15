@@ -591,3 +591,51 @@ export const createDefaultMissions = mutation({
     };
   },
 });
+/**
+ * Add browser tracking reward
+ */
+export const addBrowserReward = mutation({
+  args: {
+    userId: v.id("users"),
+    amount: v.number(),
+    source: v.string(),
+    description: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+
+    const balance = await ctx.db
+      .query("icr_balances")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .first();
+
+    if (!balance) {
+      throw new Error("Balance not found");
+    }
+
+    const newBalance = balance.balance + args.amount;
+    const newLifetime = balance.lifetimeEarnings + args.amount;
+
+    await ctx.db.patch(balance._id, {
+      balance: newBalance,
+      lifetimeEarnings: newLifetime,
+      updatedAt: now,
+    });
+
+    await ctx.db.insert("icr_transactions", {
+      userId: args.userId,
+      type: "earn",
+      amount: args.amount,
+      source: args.source,
+      description: args.description,
+      balanceAfter: newBalance,
+      createdAt: now,
+    });
+
+    return {
+      success: true,
+      newBalance,
+      amount: args.amount,
+    };
+  },
+});
