@@ -1,0 +1,7 @@
+{
+  "project": "bold-curlew-524",
+  "functions": "convex/",
+  "node": {
+    "externalPackages": []
+  }
+}

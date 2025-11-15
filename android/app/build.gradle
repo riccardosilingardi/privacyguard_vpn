@@ -49,4 +49,11 @@ flutter {
 
 dependencies {
     implementation "androidx.multidex:multidex:2.0.1"
+
+    // WireGuard VPN
+    implementation 'com.wireguard.android:tunnel:1.0.20230706'
+
+    // Coroutines for async operations
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3"
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3"
 }

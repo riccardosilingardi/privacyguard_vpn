@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:sizer/sizer.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/app_export.dart';
+import '../../core/utils/logger.dart';
+import '../../presentation/providers/vpn_provider.dart';
+import '../../domain/repositories/vpn_repository.dart';
 import './widgets/bottom_navigation_widget.dart';
 import './widgets/connection_gear_widget.dart';
 import './widgets/connection_status_banner_widget.dart';
@@ -10,45 +14,16 @@ import './widgets/quick_stats_widget.dart';
 import './widgets/server_location_widget.dart';
 import './widgets/server_selection_modal.dart';
 
-class VpnDashboard extends StatefulWidget {
+class VpnDashboard extends ConsumerStatefulWidget {
   const VpnDashboard({Key? key}) : super(key: key);
 
   @override
-  State<VpnDashboard> createState() => _VpnDashboardState();
+  ConsumerState<VpnDashboard> createState() => _VpnDashboardState();
 }
 
-class _VpnDashboardState extends State<VpnDashboard>
+class _VpnDashboardState extends ConsumerState<VpnDashboard>
     with TickerProviderStateMixin {
-  bool _isConnected = false;
-  bool _isConnecting = false;
   int _currentNavIndex = 0;
-  String _currentServer = 'Amsterdam, Netherlands';
-  String _currentCountryCode = 'NL';
-  int _currentLatency = 28;
-  Duration _sessionDuration = Duration.zero;
-  String _dataUsage = '0.0 MB';
-  String _connectionSpeed = '0 Mbps';
-  int _blockedTrackers = 0;
-  double _icrTokens = 0.0;
-  int _privacyScore = 85;
-
-  // Mock data for dashboard metrics
-  final List<Map<String, dynamic>> _mockSessionData = [
-    {
-      'duration': const Duration(hours: 2, minutes: 34, seconds: 12),
-      'dataUsage': '156.7 MB',
-      'speed': '45.2 Mbps',
-      'blockedTrackers': 247,
-      'icrEarned': 12.45,
-    },
-    {
-      'duration': const Duration(hours: 1, minutes: 18, seconds: 45),
-      'dataUsage': '89.3 MB',
-      'speed': '38.7 Mbps',
-      'blockedTrackers': 156,
-      'icrEarned': 8.92,
-    },
-  ];
 
   late AnimationController _refreshController;
   late Animation<double> _refreshAnimation;
@@ -77,84 +52,89 @@ class _VpnDashboardState extends State<VpnDashboard>
     super.dispose();
   }
 
-  void _loadMockData() {
-    final mockData = _mockSessionData[0];
-    setState(() {
-      _sessionDuration = mockData['duration'];
-      _dataUsage = mockData['dataUsage'];
-      _connectionSpeed = mockData['speed'];
-      _blockedTrackers = mockData['blockedTrackers'];
-      _icrTokens = mockData['icrEarned'];
-    });
-  }
-
   Future<void> _handleConnectionToggle() async {
-    if (_isConnecting) return;
+    final vpnState = ref.read(vpnControllerProvider);
+    final vpnController = ref.read(vpnControllerProvider.notifier);
+
+    if (vpnState.isConnecting) return;
 
     HapticFeedback.mediumImpact();
 
-    setState(() {
-      _isConnecting = true;
-    });
-
-    // Simulate connection process
-    await Future.delayed(const Duration(seconds: 2));
-
-    setState(() {
-      _isConnecting = false;
-      _isConnected = !_isConnected;
-
-      if (_isConnected) {
-        _loadMockData();
+    try {
+      if (vpnState.isConnected) {
+        // Disconnect
+        await vpnController.disconnect();
+        AppLogger.info('VPN disconnected by user');
       } else {
-        _sessionDuration = Duration.zero;
-        _dataUsage = '0.0 MB';
-        _connectionSpeed = '0 Mbps';
+        // Connect to best server
+        await vpnController.connectToBestServer();
+        AppLogger.info('VPN connected successfully');
       }
-    });
 
-    HapticFeedback.lightImpact();
+      HapticFeedback.lightImpact();
+    } catch (e, stack) {
+      AppLogger.error('Connection toggle failed', e, stack);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Connection failed: ${e.toString()}'),
+            backgroundColor: AppTheme.lightTheme.colorScheme.error,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+
+      HapticFeedback.mediumImpact();
+    }
   }
 
   Future<void> _handleRefresh() async {
     _refreshController.forward();
 
-    // Simulate data refresh
-    await Future.delayed(const Duration(milliseconds: 1500));
+    try {
+      // Refresh VPN state
+      ref.invalidate(vpnSessionStatsProvider);
+      ref.invalidate(vpnConnectionStatusProvider);
 
-    setState(() {
-      if (_isConnected) {
-        final newData = _mockSessionData[1];
-        _sessionDuration = newData['duration'];
-        _dataUsage = newData['dataUsage'];
-        _connectionSpeed = newData['speed'];
-        _blockedTrackers = newData['blockedTrackers'];
-        _icrTokens = newData['icrEarned'];
-      }
-      _privacyScore = 85 + (DateTime.now().millisecond % 15);
-    });
+      await Future.delayed(const Duration(milliseconds: 800));
+
+      AppLogger.info('Dashboard refreshed');
+    } catch (e) {
+      AppLogger.error('Refresh failed', e);
+    }
 
     _refreshController.reverse();
   }
 
-  void _handleServerSelection() {
+  Future<void> _handleServerSelection() async {
+    final vpnState = ref.read(vpnControllerProvider);
+
+    // Don't allow server change while connected
+    if (vpnState.isConnected || vpnState.isConnecting) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Disconnect VPN to change servers'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+      return;
+    }
+
     HapticFeedback.selectionClick();
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => ServerSelectionModal(
-        currentServer: _currentServer,
-        onServerSelected: (server) {
-          setState(() {
-            _currentServer = server['name'];
-            _currentCountryCode = server['code'];
-            _currentLatency = server['latency'];
-          });
-          HapticFeedback.lightImpact();
-        },
-      ),
-    );
+
+    // TODO: Implement server selection modal with real servers
+    // For now, just show a message
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Server selection coming soon'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
   }
 
   void _handleLongPressGear() {
@@ -319,6 +299,40 @@ class _VpnDashboardState extends State<VpnDashboard>
 
   @override
   Widget build(BuildContext context) {
+    // Watch VPN state from providers
+    final vpnState = ref.watch(vpnControllerProvider);
+    final sessionStatsAsync = ref.watch(vpnSessionStatsProvider);
+
+    // Extract values
+    final isConnected = vpnState.isConnected;
+    final isConnecting = vpnState.isConnecting;
+    final currentServer = vpnState.currentServer;
+    final currentSession = vpnState.currentSession;
+
+    // Stats from session
+    Duration sessionDuration = Duration.zero;
+    String dataUsage = '0.0 MB';
+    String connectionSpeed = '0 Mbps';
+    int blockedTrackers = 0;
+    double icrTokens = 0.0;
+
+    if (currentSession != null) {
+      sessionDuration = currentSession.startedAt != null
+          ? DateTime.now().difference(currentSession.startedAt!)
+          : Duration.zero;
+
+      final totalBytes = currentSession.bytesIn + currentSession.bytesOut;
+      dataUsage = '${(totalBytes / 1048576).toStringAsFixed(1)} MB';
+
+      blockedTrackers = currentSession.trackersBlocked;
+      icrTokens = currentSession.icrEarned;
+
+      // Calculate speed from stats stream
+      sessionStatsAsync.whenData((stats) {
+        connectionSpeed = '${stats.speedMbps.toStringAsFixed(1)} Mbps';
+      });
+    }
+
     return Scaffold(
       backgroundColor: AppTheme.lightTheme.scaffoldBackgroundColor,
       body: SafeArea(
@@ -375,9 +389,9 @@ class _VpnDashboardState extends State<VpnDashboard>
 
                 // Server Location
                 ServerLocationWidget(
-                  serverName: _currentServer,
-                  countryCode: _currentCountryCode,
-                  latency: _currentLatency,
+                  serverName: currentServer?.name ?? 'Select Server',
+                  countryCode: currentServer?.countryCode ?? 'XX',
+                  latency: currentServer?.latency ?? 0,
                   onTap: _handleServerSelection,
                 ),
 
@@ -387,8 +401,8 @@ class _VpnDashboardState extends State<VpnDashboard>
                 GestureDetector(
                   onLongPress: _handleLongPressGear,
                   child: ConnectionGearWidget(
-                    isConnected: _isConnected,
-                    isConnecting: _isConnecting,
+                    isConnected: isConnected,
+                    isConnecting: isConnecting,
                     onTap: _handleConnectionToggle,
                   ),
                 ),
@@ -397,12 +411,12 @@ class _VpnDashboardState extends State<VpnDashboard>
 
                 // Connection Status Banner
                 GestureDetector(
-                  onTap: _isConnected ? _showConnectionDetails : null,
+                  onTap: isConnected ? _showConnectionDetails : null,
                   child: ConnectionStatusBannerWidget(
-                    isConnected: _isConnected,
-                    sessionDuration: _sessionDuration,
-                    dataUsage: _dataUsage,
-                    connectionSpeed: _connectionSpeed,
+                    isConnected: isConnected,
+                    sessionDuration: sessionDuration,
+                    dataUsage: dataUsage,
+                    connectionSpeed: connectionSpeed,
                   ),
                 ),
 
@@ -410,15 +424,15 @@ class _VpnDashboardState extends State<VpnDashboard>
 
                 // Quick Stats
                 QuickStatsWidget(
-                  blockedTrackers: _blockedTrackers,
-                  icrTokens: _icrTokens,
-                  privacyScore: _privacyScore,
+                  blockedTrackers: blockedTrackers,
+                  icrTokens: icrTokens,
+                  privacyScore: 85, // TODO: Calculate from tracker blocking
                 ),
 
                 SizedBox(height: 4.h),
 
                 // Emergency Disconnect Info
-                if (_isConnected)
+                if (isConnected)
                   Container(
                     margin: EdgeInsets.symmetric(horizontal: 4.w),
                     padding: EdgeInsets.all(4.w),

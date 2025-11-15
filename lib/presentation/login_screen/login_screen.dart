@@ -1,32 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:sizer/sizer.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/app_export.dart';
+import '../../presentation/providers/auth_provider.dart';
 import './widgets/app_logo.dart';
 import './widgets/login_form.dart';
 import './widgets/social_login_buttons.dart';
 
-class LoginScreen extends StatefulWidget {
+class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({Key? key}) : super(key: key);
 
   @override
-  State<LoginScreen> createState() => _LoginScreenState();
+  ConsumerState<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
+class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  bool _isLoading = false;
   String? _errorMessage;
-
-  // Mock credentials for testing
-  final Map<String, String> _mockCredentials = {
-    'admin@privacyguard.com': 'admin123',
-    'user@privacyguard.com': 'user123',
-    'demo@privacyguard.com': 'demo123',
-  };
 
   @override
   void dispose() {
@@ -39,19 +33,18 @@ class _LoginScreenState extends State<LoginScreen> {
     if (!_formKey.currentState!.validate()) return;
 
     setState(() {
-      _isLoading = true;
       _errorMessage = null;
     });
-
-    // Simulate authentication delay
-    await Future.delayed(const Duration(seconds: 2));
 
     final email = _emailController.text.trim();
     final password = _passwordController.text;
 
-    // Check mock credentials
-    if (_mockCredentials.containsKey(email) &&
-        _mockCredentials[email] == password) {
+    try {
+      // Use Riverpod auth controller
+      await ref
+          .read(authControllerProvider.notifier)
+          .login(email, password);
+
       // Success - trigger haptic feedback
       HapticFeedback.lightImpact();
 
@@ -59,53 +52,47 @@ class _LoginScreenState extends State<LoginScreen> {
         // Navigate to VPN Dashboard
         Navigator.pushReplacementNamed(context, '/vpn-dashboard');
       }
-    } else {
+    } catch (e) {
       // Authentication failed
       setState(() {
-        _errorMessage = _mockCredentials.containsKey(email)
-            ? 'Incorrect password. Please try again for secure access.'
-            : 'Account not found. Please check your email or sign up.';
+        _errorMessage = e.toString().replaceAll('Exception: ', '');
       });
 
       HapticFeedback.mediumImpact();
-    }
-
-    if (mounted) {
-      setState(() {
-        _isLoading = false;
-      });
     }
   }
 
   Future<void> _handleGoogleLogin() async {
     setState(() {
-      _isLoading = true;
       _errorMessage = null;
     });
 
-    // Simulate Google authentication
-    await Future.delayed(const Duration(seconds: 1));
-
-    HapticFeedback.lightImpact();
-
+    // TODO: Implement Google OAuth
+    // For now, show message
     if (mounted) {
-      Navigator.pushReplacementNamed(context, '/vpn-dashboard');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Google login coming soon'),
+          duration: Duration(seconds: 2),
+        ),
+      );
     }
   }
 
   Future<void> _handleAppleLogin() async {
     setState(() {
-      _isLoading = true;
       _errorMessage = null;
     });
 
-    // Simulate Apple authentication
-    await Future.delayed(const Duration(seconds: 1));
-
-    HapticFeedback.lightImpact();
-
+    // TODO: Implement Apple Sign In
+    // For now, show message
     if (mounted) {
-      Navigator.pushReplacementNamed(context, '/vpn-dashboard');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Apple login coming soon'),
+          duration: Duration(seconds: 2),
+        ),
+      );
     }
   }
 
@@ -152,6 +139,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Watch auth controller state for loading indicator
+    final authState = ref.watch(authControllerProvider);
+    final isLoading = authState.isLoading;
+
     return Scaffold(
       backgroundColor: AppTheme.lightTheme.scaffoldBackgroundColor,
       body: SafeArea(
@@ -235,7 +226,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   passwordController: _passwordController,
                   formKey: _formKey,
                   onForgotPassword: _handleForgotPassword,
-                  isLoading: _isLoading,
+                  isLoading: isLoading,
                 ),
                 SizedBox(height: 3.h),
 
@@ -244,7 +235,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   height: 6.h,
                   child: ElevatedButton(
                     onPressed:
-                        (_isFormValid && !_isLoading) ? _handleSignIn : null,
+                        (_isFormValid && !isLoading) ? _handleSignIn : null,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppTheme.lightTheme.colorScheme.primary,
                       foregroundColor:
@@ -256,7 +247,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         borderRadius: BorderRadius.circular(12),
                       ),
                     ),
-                    child: _isLoading
+                    child: isLoading
                         ? SizedBox(
                             width: 20,
                             height: 20,
@@ -283,7 +274,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 SocialLoginButtons(
                   onGoogleLogin: _handleGoogleLogin,
                   onAppleLogin: _handleAppleLogin,
-                  isLoading: _isLoading,
+                  isLoading: isLoading,
                 ),
                 SizedBox(height: 6.h),
 
@@ -298,7 +289,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ),
                     TextButton(
-                      onPressed: _isLoading ? null : _navigateToSignUp,
+                      onPressed: isLoading ? null : _navigateToSignUp,
                       style: TextButton.styleFrom(
                         padding: EdgeInsets.symmetric(horizontal: 1.w),
                         minimumSize: Size(0, 6.h),
